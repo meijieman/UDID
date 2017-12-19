@@ -1,0 +1,193 @@
+
+UDID (Unique Device Identifier)
+UUID（Universally Unique Identifier）
+
+
+
+
+
+android 设备唯一码的获取
+
+Android 中的几中方法，使用中常常不可靠
+
+为了实现在设备上更通用的获取设备唯一标识，我们可以实现这样的一个类，为每个设备产生唯一的UUID，以ANDROID_ID为基础，在获取失败时以TelephonyManager.getDeviceId()为备选方法，如果再失败，使用UUID的生成策略。
+
+
+预研
+
+为了实现获取设备唯一标识
+定义一个类，先获取该设备的可能的唯一标志
+然后传送到服务端。
+服务端根据获取到的数据的情况来确定使用哪些字段来作为唯一标志
+
+
+1. DEVICE_ID
+假设我们确实需要用到真实设备的标识，可能就需要用到DEVICE_ID。通过 TelephonyManager.getDeviceId()获取，它根据不同的手机设备返回IMEI（移动设备国际身份码），MEID或者ESN码.
+
+缺点：
+1.非手机：如平板电脑，像这样设备没有通话的硬件功能，系统中也就没有 TELEPHONY_SERVICE，自然也就无法获得 DEVICE_ID;
+2.权限问题：获取DEVICE_ID需要READ_PHONE_STATE权限；
+3.厂商定制系统中的Bug：少数手机设备上，由于该实现有漏洞，会返回垃圾，如:00000000或者****
+
+
+2. MAC ADDRESS
+我们也可以通过Wifi获取MAC ADDRESS作为DEVICE ID
+
+蓝牙 Mac
+BluetoothAdapter.getDefaultAdapter().getAddress();
+
+理论上Mac Address每台手机各不相同
+例外
+1. 通过平台公司提供的工具来自行改写
+2. 在模拟器上面，默认情况下没有硬件设备
+
+缺点：
+1.如果设备没有支持WIFI的硬件，就返回null；
+2.如果设备没有支持蓝牙的硬件，就返回null。
+
+获取 mac 可以通过 shell(/sys/class/net/wlan0/address) 和 java api 来得到， shell 在wifi 关闭时无法获取到， java api在WIFI关闭的情况下读取，这里也有一个限制，就是WIFI在开机后，有被开启过才行（虽然开启后再关闭也是可以的）。而且WIFI被动开启的期间也是没有办法读取到Mac地址的，因此开启的工作需要在前面完成，因此可以在程序加载的时候就去尝试开机一次WIFI，然后关闭掉。后面需要使用Mac地址的时候，就可以直接读取了。
+
+
+缺点：如果Wifi关闭的时候，硬件设备可能无法返回MAC ADDRESS.。
+
+
+3. ANDROID_ID
+ANDROID_ID是设备第一次启动时产生和存储的64bit的一个数，
+
+缺点：当设备被wipe后该数改变, 不适用。
+
+4. Serial Number
+android.os.Build.SERIAL直接读取
+缺点：在少数的一些设备上，会返回垃圾数据
+
+
+5. Model （机型）来识别， 可以区分模拟器（模拟器的该值一般是sdk或者google_sdk）
+android.os.Build.MODEL;
+
+
+6. 应用第一次安装时，在系统上生成一个文件，该文件保存唯一标志，或根据厂商获取。
+
+缺点：可能被删除
+
+
+使用 Linux 的方法来获取cpu， mac，用这两个作为唯一标志
+1. cpu 号
+文件在： /proc/cpuinfo
+
+
+//Get Mac Address by Linux command
+ public static String getMacAddressByCommand() {
+  String macSerial = null;
+  String str = "";
+  try {
+   Process pp = Runtime.getRuntime().exec("cat /sys/class/net/wlan0/address ");
+   InputStreamReader ir = new InputStreamReader(pp.getInputStream());
+   LineNumberReader input = new LineNumberReader(ir);
+   for (; null != str;) {
+    str = input.readLine();
+    if (str != null) {
+     macSerial = str.trim();
+     break;
+    }
+   }
+  } catch (IOException ex) {
+   ex.printStackTrace();
+  }
+  Helper.showLog(TAG, "getMacAddressByCommand:" + macSerial);
+  return macSerial;
+ }
+
+ // Get Mac Address by Java API
+ public static String getMacAddressByAPI(Context context) {
+  WifiManager wifi = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+  String macAddressAPI = null;
+  if (wifi != null) {
+   //Try to get mac address firstly,if empty,need switch on WIFI
+   try {
+    if (macAddressAPI == null) {
+     WifiInfo info = wifi.getConnectionInfo();
+     macAddressAPI = info.getMacAddress();
+    }
+   } catch (Exception e) {}
+   if(macAddressAPI == null){
+    Helper.showLog(TAG, "getMacAddressByAPI:WIFI not init,need to switch on WIFI");
+    int state =wifi.getWifiState();
+    boolean isWifiEnabled = (state == WifiManager.WIFI_STATE_ENABLED) || (state == WifiManager.WIFI_STATE_ENABLING);
+    if (!isWifiEnabled) {
+     wifi.setWifiEnabled(true);
+    }
+    try {
+     if (macAddressAPI == null) {
+      WifiInfo info = wifi.getConnectionInfo();
+      macAddressAPI = info.getMacAddress();
+     }
+    } catch (Exception e) {
+
+    } finally {
+     if (!isWifiEnabled) {
+      wifi.setWifiEnabled(false);
+     }
+    }
+   }else{
+    Helper.showLog(TAG, "getMacAddressByAPI:no need to switch on WIFI");
+   }
+  }
+  Helper.showLog(TAG, "getMacAddressByAPI:" + macAddressAPI);
+  return macAddressAPI;
+ }
+
+ <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+
+
+Pseudo-Unique ID, 这个在任何Android手机中都有效
+有一些特殊的情况，一些如平板电脑的设置没有通话功能，或者你不愿加入READ_PHONE_STATE许可。而你仍然想获得唯一序列号之类的东西。这时你可以通过取出ROM版本、制造商、CPU型号、以及其他硬件信息来实现这一点。这样计算出来的ID不是唯一的（因为如果两个手机应用了同样的硬件以及Rom 镜像）。但应当明白的是，出现类似情况的可能性基本可以忽略。要实现这一点，你可以使用Build类:
+
+ private String getPseudo(){
+        String m_szDevIDShort = "35" + "/"+//we make this look like a valid IMEI
+
+                Build.BOARD.length()%10 +"/"+
+                Build.BRAND.length()%10 +"/"+
+                Build.CPU_ABI.length()%10 +"/"+
+                Build.DEVICE.length()%10 +"/"+
+                Build.DISPLAY.length()%10 +"/"+
+                Build.HOST.length()%10 +"/"+
+                Build.ID.length()%10 +"/"+
+                Build.MANUFACTURER.length()%10 +"/"+
+                Build.MODEL.length()%10 +"/"+
+                Build.PRODUCT.length()%10 +"/"+
+                Build.TAGS.length()%10 +"/"+
+                Build.TYPE.length()%10 +"/"+
+                Build.USER.length()%10+"/"; //13 digits
+        return m_szDevIDShort;
+    }
+
+android.os.Build.BOARD：获取设备基板名称
+android.os.Build.BOOTLOADER:获取设备引导程序版本号
+android.os.Build.BRAND：获取设备品牌
+android.os.Build.CPU_ABI：获取设备指令集名称（CPU的类型）
+android.os.Build.CPU_ABI2：获取第二个指令集名称
+android.os.Build.DEVICE：获取设备驱动名称
+android.os.Build.DISPLAY：获取设备显示的版本包（在系统设置中显示为版本号）和ID一样
+android.os.Build.FINGERPRINT：设备的唯一标识。由设备的多个信息拼接合成。
+android.os.Build.HARDWARE：设备硬件名称,一般和基板名称一样（BOARD）
+android.os.Build.HOST：设备主机地址
+android.os.Build.ID:设备版本号。
+android.os.Build.MODEL ：获取手机的型号 设备名称。
+android.os.Build.MANUFACTURER:获取设备制造商
+android:os.Build.PRODUCT：整个产品的名称
+android:os.Build.RADIO：无线电固件版本号，通常是不可用的 显示unknown
+android.os.Build.TAGS：设备标签。如release-keys 或测试的 test-keys
+android.os.Build.TIME：时间
+android.os.Build.TYPE:设备版本类型  主要为"user" 或"eng".
+android.os.Build.USER:设备用户名 基本上都为android-build
+android.os.Build.VERSION.RELEASE：获取系统版本字符串。如4.1.2 或2.2 或2.3等
+android.os.Build.VERSION.CODENAME：设备当前的系统开发代号，一般使用REL代替
+android.os.Build.VERSION.INCREMENTAL：系统源代码控制值，一个数字或者git hash值
+android.os.Build.VERSION.SDK：系统的API级别 一般使用下面大的SDK_INT 来查看
+android.os.Build.VERSION.SDK_INT：系统的API级别 数字表示
+
+设备唯一标识码还是以utdid做标识，但是在Android6.0+系统上，外存储权限越来越难获取和越来越不可靠的情况下，除考虑加入LocalSocket和Broadcast等机制做多应用间的utdid同步（问题也很明显）外，必须依赖网络，构建设备ID库来提升设备标识的可靠性。
+因此需要考虑在服务器上建立utdid与各设备数据间的对应关系，通过做大规模的适配和数据上报，来解决问题。通过可获得手机参数做服务器请求，服务器的utdid与各设备数据间的对应关系表来寻找最匹配utdid值。
+可以考虑的数据关系体系是以Wifi Mac地址、设备序列号、ANDROID_ID为主要基准，配合android.os.Build中手机基本信息为参考（用手机root相关信息采集做修正），DEVICE_ID（用READ_PHONE_STATE权限做修正），常用ip地址等。如果可以的话，还可以参考手机号码、业务登录账号等。目前只是一些初步想法，可行性还有待实际数据验证，方案还在探索阶段。
