@@ -47,7 +47,14 @@ public class DeviceUuidFactory{
                             } else {
                                 TelephonyManager manager = (TelephonyManager)context.getApplicationContext().getSystemService(Context.TELEPHONY_SERVICE);
                                 String deviceId = manager.getDeviceId();
-                                uuid = deviceId != null ? UUID.nameUUIDFromBytes(deviceId.getBytes("utf8")) : UUID.randomUUID();
+
+//                                uuid = deviceId != null ? UUID.nameUUIDFromBytes(deviceId.getBytes("utf8")) : UUID.randomUUID();
+                                // If running on an emulator
+                                if(deviceId == null || deviceId.trim().length() == 0 || deviceId.matches("0+")){
+                                    uuid = UUID.randomUUID();
+                                } else {
+                                    uuid = UUID.nameUUIDFromBytes(deviceId.getBytes("utf8"));
+                                }
                             }
                         } catch(UnsupportedEncodingException e){
                             throw new RuntimeException(e);
